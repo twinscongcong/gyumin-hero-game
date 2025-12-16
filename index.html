@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport"
+content="width=device-width, height=device-height,
+initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>블랙팬서 점프 슈팅</title>
+<style>
+  body { margin:0; overflow:hidden; background:black; }
+  canvas { display:block; }
+</style>
+</head>
+
+<body>
+<canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+function resize(){
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener("resize", resize);
+resize();
+
+const pantherImg = new Image();
+pantherImg.src = "panther.png";
+
+const blockImg = new Image();
+blockImg.src = "block.png";
+
+const bgImg = new Image();
+bgImg.src = "background.png";
+
+const AudioContext = window.AudioContext || window.webkitAudioContext;
+const audioCtx = new AudioContext();
+
+function shootSound(){
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = "square";
+  o.frequency.value = 600;
+  g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime+0.1);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime+0.1);
+}
+
+function hitSound(){
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = "triangle";
+  o.frequency.value = 200;
+  g.gain.setValueAtTime(0.2, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime+0.2);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime+0.2);
+}
+
+const bgmOsc = audioCtx.createOscillator();
+const bgmGain = audioCtx.createGain();
+bgmOsc.type = "sine";
+bgmOsc.frequency.value = 110;
+bgmGain.gain.value = 0.03;
+bgmOsc.connect(bgmGain);
+bgmGain.connect(audioCtx.destination);
+bgmOsc.start();
+
+document.body.addEventListener("touchstart", ()=>{
+  if(audioCtx.state==="suspended") audioCtx.resume();
+},{once:true});
+
+let bullets = [];
+let blocks = [];
+let particles = [];
+let score = 0;
+let hp = 5;
+const maxHp = 5;
+let best = localStorage.getItem("bestScore") || 0;
+let gameOver = false;
+
+const gravity = 0.8;
+const groundY = () => canvas.height - 120;
+
+const player = {
+  x:80, y:0, w:80, h:80,
+  vy:0, onGround:false
+};
+
+let pressTime = 0;
+
+function shoot(){
+  bullets.push({x:player.x+player.w, y:player.y+40, w:8, h:3});
+  shootSound();
+}
+
+function jump(t){
+  if(!player.onGround) return;
+  player.vy = t<200 ? -12 : -18;
+  player.onGround = false;
+}
+
+canvas.addEventListener("touchstart", ()=>pressTime=Date.now());
+canvas.addEventListener("touchend", ()=>{
+  jump(Date.now()-pressTime);
+  shoot();
+});
+canvas.addEventListener("mousedown", ()=>pressTime=Date.now());
+canvas.addEventListener("mouseup", ()=>{
+  jump(Date.now()-pressTime);
+  shoot();
+});
+
+function createBlock(){
+  const types=[
+    {y:groundY(), size:90, color:"brown"},
+    {y:groundY()-80, size:70, color:"green"},
+    {y:groundY()-160, size:60, color:"red"}
+  ];
+  const t=types[Math.floor(Math.random()*3)];
+  blocks.push({x:canvas.width, y:t.y, size:t.size, color:t.color});
+}
+setInterval(createBlock,1500);
+
+function explode(x,y,color){
+  for(let i=0;i<12;i++){
+    particles.push({
+      x,y,
+      vx:(Math.random()-0.5)*6,
+      vy:(Math.random()-0.5)*6,
+      life:30,
+      color
+    });
+  }
+  hitSound();
+}
+
+function drawStar(x,y,r,c){
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.fillStyle=c;
+  ctx.beginPath();
+  for(let i=0;i<5;i++){
+    ctx.lineTo(Math.cos((18+i*72)*Math.PI/180)*r,
+               -Math.sin((18+i*72)*Math.PI/180)*r);
+    ctx.lineTo(Math.cos((54+i*72)*Math.PI/180)*(r/2),
+               -Math.sin((54+i*72)*Math.PI/180)*(r/2));
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function hit(a,b){
+  return a.x < b.x+b.size &&
+         a.x+a.w > b.x &&
+         a.y < b.y+b.size &&
+         a.y+a.h > b.y;
+}
+
+function drawHP(){
+  for(let i=0;i<maxHp;i++){
+    ctx.fillStyle = i<hp ? "red" : "#ccc";
+    ctx.fillRect(20+i*30,20,20,20);
+  }
+}
+
+function update(){
+  if(gameOver) return;
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(bgImg,0,0,canvas.width,canvas.height);
+
+  player.vy+=gravity;
+  player.y+=player.vy;
+  if(player.y>=groundY()){
+    player.y=groundY();
+    player.vy=0;
+    player.onGround=true;
+  }
+
+  ctx.drawImage(pantherImg,player.x,player.y,player.w,player.h);
+
+  bullets.forEach(b=>{
+    b.x+=10;
+    ctx.fillStyle="black";
+    ctx.fillRect(b.x,b.y,b.w,b.h);
+  });
+
+  blocks.forEach((bl,i)=>{
+    bl.x-=4;
+    ctx.drawImage(blockImg,bl.x,bl.y,bl.size,bl.size);
+    if(hit(player,bl)){
+      blocks.splice(i,1);
+      hp--;
+      hitSound();
+      if(hp<=0) endGame();
+    }
+  });
+
+  bullets.forEach((b,bi)=>{
+    blocks.forEach((bl,i)=>{
+      if(hit(b,bl)){
+        bullets.splice(bi,1);
+        blocks.splice(i,1);
+        explode(bl.x+bl.size/2, bl.y+bl.size/2, bl.color);
+        score++;
+      }
+    });
+  });
+
+  particles.forEach((p,i)=>{
+    p.x+=p.vx;
+    p.y+=p.vy;
+    p.life--;
+    drawStar(p.x,p.y,6,p.color);
+    if(p.life<=0) particles.splice(i,1);
+  });
+
+  drawHP();
+  ctx.fillStyle="black";
+  ctx.font="18px Arial";
+  ctx.fillText("점수:"+score,20,80);
+  ctx.fillText("최고:"+best,20,105);
+
+  requestAnimationFrame(update);
+}
+
+function endGame(){
+  gameOver=true;
+  if(score>best) localStorage.setItem("bestScore",score);
+  ctx.font="40px Arial";
+  ctx.fillText("게임 오버",canvas.width/2-90,canvas.height/2);
+}
+
+update();
+</script>
+</body>
+</html>
